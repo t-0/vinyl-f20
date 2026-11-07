@@ -1,0 +1,6 @@
+#!/bin/sh
+# C compiler / linker for the Surfans F20 (Ingenic X1000: MIPS32r2, little
+# endian). The hard-float ABI matches tools/mipsel-f20.json (the X1000 has an FPU),
+# so Rust code, alsa-lib and musl agree on how floats are passed. Used as the Rust
+# linker and as CC for any C compiled along the way.
+exec zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 "$@"

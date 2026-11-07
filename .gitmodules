@@ -1,0 +1,3 @@
+[submodule "external/vinyl"]
+	path = external/vinyl
+	url = git@github.com:t-0/vinyl.git

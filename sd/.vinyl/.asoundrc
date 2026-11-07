@@ -1,0 +1,27 @@
+# ALSA routing for vinyl on the F20. The player's card 0 is the ES9018K2M DAC
+# (hw:0,0). "default" goes through a software volume stage so volume works the
+# same on every hardware revision; on hw2+ the DAC's own attenuator is used
+# instead and this stays at full scale.
+pcm.!default {
+    type plug
+    slave.pcm "vinylvol"
+}
+pcm.vinylvol {
+    type softvol
+    slave.pcm {
+        type hw
+        card 0
+        device 0
+    }
+    control {
+        name "Software Volume"
+        card 0
+    }
+    min_dB -51.0
+    max_dB 0.0
+    resolution 256
+}
+ctl.!default {
+    type hw
+    card 0
+}
