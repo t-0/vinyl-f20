@@ -39,7 +39,8 @@ path and `src/f20` adds what a pocket player needs instead of a terminal:
 
 Audio is vinyl's own path (rodio → cpal → alsa-lib) against a static
 alsa-lib cross-built here; `.asoundrc` on the card routes `default` through
-a software volume stage to `hw:0,0`.
+a software volume stage to `hw:0,0`. The buffer size vinyl asks for comes
+from `audio_buffer` in `f20.conf` (see *Settings*).
 
 ## Building
 
@@ -144,7 +145,15 @@ font = 6x12            # 5x8 (64x30 cells), 6x12 (53x20), 8x16 (40x15)
 swap_prev_next = false # if the kernel reports Prev/Next the other way round
 screen_timeout = 30    # seconds without a press before the backlight goes off; 0 never
 volume = 50            # starting volume until one is saved (.vinyl/volume)
+audio_buffer = 4096    # frames per DAC period, two buffered (~186 ms); 0 = vinyl's 50 ms
 ```
+
+Audio runs on one core with no real-time kernel, so the player asks the DAC
+for a larger buffer than vinyl uses on a desktop, puts cpal's output thread
+on `SCHED_FIFO`, and lowers the UI, indexing and level-measuring threads
+beneath it. `boot.log` records what it managed (`audio thread ...`) and what
+ALSA negotiated (`alsa stream: ...`); an underrun that still gets through
+shows up in `.vinyl.log` as `audio stream error`.
 
 ## Layout
 
@@ -171,4 +180,15 @@ tools/zig-cc, tools/zig-ar       the C toolchain wrappers
   audio buffer fed on the player.
 - No Bluetooth, no USB mass storage mode from inside the player (use the
   original firmware for that), no on-screen keyboard.
-- 32 MiB of RAM: large libraries (tens of thousands of tracks) are untested.
+- 32 MiB of RAM: large libraries (under 10,000) takes a couple of minutes to index ; huge are untested.
+
+## Versions
+
+### v1
+
+- initial release
+
+### v1.1
+
+- occasional audio drop-outs fixed with buffer size
+- bumps vinyl

@@ -88,6 +88,10 @@ pub fn main(args: Vec<String>) -> Result<()> {
         )?;
     }
     let settings = Settings::load(&home.join("f20.conf"));
+    if settings.audio_buffer > 0 {
+        // Still single-threaded: see above.
+        unsafe { std::env::set_var("VINYL_AUDIO_BUFFER", settings.audio_buffer.to_string()) };
+    }
     let panic_log = home.join("boot.log");
     let panic_settings = settings.clone();
     std::panic::set_hook(Box::new(move |info| {
@@ -235,23 +239,90 @@ fn run_player(settings: &Settings, home: &Path, boot: &mut BootLog) -> Result<()
     let mut plat = DevicePlatform::new(home, settings);
     boot.line(&plat.describe());
     step(10);
-    let mut app = App::new(config);
-    if let Some(e) = &app.audio_error {
-        boot.line(&format!("audio: {e}"));
-    }
-    boot.line("audio and index started");
-    // The audio callback thread already exists; make this (UI) thread yield
-    // to it. On Linux setpriority with a thread id affects only that thread.
+    // Lower this (UI) thread before anything is spawned from it: the index
+    // scanner, level measurement and index saves inherit the nice value and
+    // must all yield to audio. On Linux setpriority with a thread id affects
+    // only that thread.
     // SAFETY: plain syscalls with no memory arguments.
     unsafe {
         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
         libc::setpriority(libc::PRIO_PROCESS, tid, 10);
     }
+    let mut app = App::new(config);
+    if let Some(e) = &app.audio_error {
+        boot.line(&format!("audio: {e}"));
+    }
+    boot.line("audio and index started");
+    boot.line(&sched::boost_audio_thread());
     step(11);
     let r = super::run::run(&mut terminal, &mut app, &mut plat);
     step(13);
     plat.hw.save();
     r
+}
+
+/// Scheduling for the audio callback thread. cpal names its ALSA output
+/// thread and runs it at normal priority (its real-time support needs rtkit,
+/// which the player does not have). Decoding and the effects chain run on
+/// that thread, so it must win over the scanner and the UI on the one core.
+mod sched {
+    use std::path::Path;
+
+    const AUDIO_THREAD: &str = "cpal_alsa_out";
+    const FIFO_PRIORITY: libc::c_int = 50;
+    const NICE_FALLBACK: libc::c_int = -15;
+
+    /// Finds cpal's output thread and makes it real-time (SCHED_FIFO), or at
+    /// least high priority. Returns a line for the boot log.
+    pub fn boost_audio_thread() -> String {
+        let Some(tid) = find_thread(AUDIO_THREAD) else {
+            return format!("audio thread: no thread named {AUDIO_THREAD}");
+        };
+        match set_fifo(tid, FIFO_PRIORITY) {
+            Ok(()) => format!("audio thread {tid}: SCHED_FIFO {FIFO_PRIORITY}"),
+            Err(fifo) => match set_nice(tid, NICE_FALLBACK) {
+                Ok(()) => format!("audio thread {tid}: nice {NICE_FALLBACK} (SCHED_FIFO refused: {fifo})"),
+                Err(nice) => format!("audio thread {tid}: left at normal priority (SCHED_FIFO: {fifo}; nice: {nice})"),
+            },
+        }
+    }
+
+    fn find_thread(name: &str) -> Option<libc::pid_t> {
+        let tasks = std::fs::read_dir("/proc/self/task").ok()?;
+        for entry in tasks.flatten() {
+            let tid: libc::pid_t = entry.file_name().to_str()?.parse().ok()?;
+            if comm(&entry.path()).as_deref() == Some(name) {
+                return Some(tid);
+            }
+        }
+        None
+    }
+
+    fn comm(task: &Path) -> Option<String> {
+        std::fs::read_to_string(task.join("comm")).ok().map(|s| s.trim().to_string())
+    }
+
+    /// The kernel's `struct sched_param` is one int (musl's has extra,
+    /// unused fields).
+    #[repr(C)]
+    struct KernelSchedParam {
+        sched_priority: libc::c_int,
+    }
+
+    /// musl's sched_setscheduler is a stub (it returns ENOSYS on purpose), so
+    /// this goes straight to the syscall, which on Linux takes a thread id.
+    fn set_fifo(tid: libc::pid_t, priority: libc::c_int) -> Result<(), std::io::Error> {
+        let param = KernelSchedParam { sched_priority: priority };
+        // SAFETY: `param` outlives the call and matches the kernel's struct.
+        let r = unsafe { libc::syscall(libc::SYS_sched_setscheduler, tid, libc::SCHED_FIFO, &param as *const KernelSchedParam) };
+        if r == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    }
+
+    fn set_nice(tid: libc::pid_t, nice: libc::c_int) -> Result<(), std::io::Error> {
+        // SAFETY: plain syscall with no memory arguments.
+        let r = unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, nice) };
+        if r == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    }
 }
 
 /// A line of text on the panel for `secs` seconds (used when the UI cannot run).

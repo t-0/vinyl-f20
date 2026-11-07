@@ -14,6 +14,9 @@ pub struct Settings {
     /// Pin the DAC "Output Port Switch" to this value instead of following
     /// the jack switches (None = automatic).
     pub port: Option<i32>,
+    /// Frames per ALSA period asked of the output device (`VINYL_AUDIO_BUFFER`);
+    /// two periods are buffered. 0 leaves the choice to rodio (about 50 ms).
+    pub audio_buffer: u32,
 }
 
 impl Default for Settings {
@@ -25,6 +28,7 @@ impl Default for Settings {
             volume: 50,
             mixer: true,
             port: None,
+            audio_buffer: 4096,
         }
     }
 }
@@ -48,6 +52,7 @@ impl Settings {
                 "volume" => s.volume = v.parse::<i32>().unwrap_or(s.volume).clamp(0, 100),
                 "mixer" => s.mixer = !matches!(v, "false" | "no" | "0"),
                 "port" => s.port = v.parse::<i32>().ok().filter(|p| (0..=5).contains(p)),
+                "audio_buffer" => s.audio_buffer = v.parse().unwrap_or(s.audio_buffer),
                 _ => {}
             }
         }
@@ -67,8 +72,9 @@ mod tests {
 
     #[test]
     fn parses_known_keys_and_ignores_the_rest() {
-        let s = Settings::parse("# c\nfont = 8x16\nswap_prev_next = yes\nscreen_timeout=45\nvolume = 120\nbogus = 1\n");
+        let s = Settings::parse("# c\nfont = 8x16\nswap_prev_next = yes\nscreen_timeout=45\nvolume = 120\naudio_buffer = 2048\nbogus = 1\n");
         assert_eq!(s.font, "8x16");
+        assert_eq!(s.audio_buffer, 2048);
         assert!(s.swap_prev_next);
         assert_eq!(s.screen_timeout_secs, 45);
         assert_eq!(s.volume, 100);
