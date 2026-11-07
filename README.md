@@ -192,3 +192,7 @@ tools/zig-cc, tools/zig-ar       the C toolchain wrappers
 
 - occasional audio drop-outs fixed with buffer size
 - bumps vinyl
+
+### v1.7
+
+- update and keep version in lock-step with upstream vinyl
